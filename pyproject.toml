@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "libeer-ako"
+version = "0.1.0"
+description = "Fork of LibEER with raw_tc feature and split fixes"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "ako" }]
+
+[tool.setuptools]
+packages = ["LibEER"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+LibEER = ["**/*.yaml", "**/*.txt", "**/*.md"]
