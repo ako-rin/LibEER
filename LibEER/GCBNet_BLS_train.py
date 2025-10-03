@@ -1,12 +1,12 @@
-from models.Models import Model
-from ..config.setting import seed_sub_dependent_front_back_setting, preset_setting, set_setting_by_args
-from ..data_utils.load_data import get_data
-from ..data_utils.split import merge_to_part, index_to_data, get_split_index
-from ..utils.args import get_args_parser
-from ..utils.store import make_output_dir
-from ..utils.utils import state_log, result_log, setup_seed, sub_result_log
-from ..Trainer.training import train
-from models.GCBNet_BLS import SparseL2Regularization
+from .models.Models import Model
+from .config.setting import seed_sub_dependent_front_back_setting, preset_setting, set_setting_by_args
+from .data_utils.load_data import get_data
+from .data_utils.split import merge_to_part, index_to_data, get_split_index
+from .utils.args import get_args_parser
+from .utils.store import make_output_dir
+from .utils.utils import state_log, result_log, setup_seed, sub_result_log
+from .Trainer.training import train
+from .models.GCBNet_BLS import SparseL2Regularization
 import torch
 import torch.optim as optim
 import torch.nn as nn

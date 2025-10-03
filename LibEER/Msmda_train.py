@@ -1,17 +1,17 @@
-from models.Models import Model
-from ..config.setting import seed_sub_independent_leave_one_out_setting, preset_setting, set_setting_by_args
-from ..data_utils.load_data import get_data
-from ..data_utils.split import merge_to_part, index_to_data, get_split_index
-from ..utils.args import get_args_parser
-from ..utils.store import make_output_dir
-from ..utils.utils import state_log, result_log, setup_seed, sub_result_log
-from ..Trainer.MsMdaTraining import train
-from models.DGCNN import NewSparseL2Regularization
+from .models.Models import Model
+from .config.setting import seed_sub_independent_leave_one_out_setting, preset_setting, set_setting_by_args
+from .data_utils.load_data import get_data
+from .data_utils.split import merge_to_part, index_to_data, get_split_index
+from .utils.args import get_args_parser
+from .utils.store import make_output_dir
+from .utils.utils import state_log, result_log, setup_seed, sub_result_log
+from .Trainer.MsMdaTraining import train
+from .models.DGCNN import NewSparseL2Regularization
 import torch
 import torch.optim as optim
 import torch.nn as nn
 import numpy as np
-from ..data_utils.preprocess import ele_normalize
+from .data_utils.preprocess import ele_normalize
 
 # run this file with
 #    python Msmda_reproduction.py -sessions 1 2 3 -model MS-MDA -batch_size 256 -epochs 200 -lr 0.01 -setting  'seed_sub_independent_leave_one_out_setting' -seed 20 -sr 15

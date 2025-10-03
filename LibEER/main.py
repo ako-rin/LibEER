@@ -1,13 +1,13 @@
 import numpy as np
 
-from ..config.setting import Setting, preset_setting, set_setting_by_args
-from models.Models import Model
+from .config.setting import Setting, preset_setting, set_setting_by_args
+from .models.Models import Model
 
-from ..utils.utils import state_log, result_log, setup_seed, sub_result_log
-from ..utils.args import get_args_parser
-from ..data_utils.load_data import get_data
-from ..data_utils.split import merge_to_part, index_to_data, get_split_index
-from ..utils.store import save_res
+from .utils.utils import state_log, result_log, setup_seed, sub_result_log
+from .utils.args import get_args_parser
+from .data_utils.load_data import get_data
+from .data_utils.split import merge_to_part, index_to_data, get_split_index
+from .utils.store import save_res
 
 
 def main(args):
