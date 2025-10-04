@@ -8,8 +8,8 @@ from functools import partial
 
 from torch.nn.modules.module import T
 
-from ..data_utils.load_data import get_uniform_data, read_seedIV_raw, read_seed_feature, read_seedIV_feature
-from ..data_utils.preprocess import bandpass_filter, feature_extraction, psd_extraction
+from .data_utils.load_data import get_uniform_data, read_seedIV_raw, read_seed_feature, read_seedIV_feature
+from .data_utils.preprocess import bandpass_filter, feature_extraction, psd_extraction
 from scipy.io import loadmat
 import numpy as np
 import torch
@@ -234,7 +234,7 @@ from glob import glob
 import scipy.signal
 import matplotlib.pyplot as plt
 import pickle
-from ..data_utils.load_data import read_deap_preprocessed, label_process
+from .data_utils.load_data import read_deap_preprocessed, label_process
 
 def deap_preprocessing():
     t1 = time.time()
@@ -264,10 +264,10 @@ def deap_preprocessing():
     #     for sub_data in ses_data:
     #         for trail_data in sub_data:
     #             print(trail_data.shape)
-from ..data_utils.preprocess import segment_data
-from ..data_utils.split import merge_to_part
-from ..config.setting import seed_sub_dependent_front_back_setting
-from ..utils.args import get_args_parser
+from .data_utils.preprocess import segment_data
+from .data_utils.split import merge_to_part
+from .config.setting import seed_sub_dependent_front_back_setting
+from .utils.args import get_args_parser
 def test_de():
     pass_band = [0.5 ,60]
     extract_bands = [[1, 4], [4, 8], [8, 14], [14, 31], [31, 50]]
@@ -282,10 +282,10 @@ def test_de():
     data, label = merge_to_part(data, label, setting)
 
 def test_m():
-    from ..data_utils.preprocess import generate_rgnn_adjacency_matrix
-    from ..data_utils.constants.seed import SEED_CHANNEL_NAME, SEED_GLOBAL_CHANNEL_PAIRS
-    from ..data_utils.constants.channel_location import system_10_20_loc, system_10_05_loc
-    a = generate_rgnn_adjacency_matrix(channel_names=SEED_CHANNEL_NAME,channel_loc=system_10_05_loc,global_channel_pair=SEED_GLOBAL_CHANNEL_PAIRS)
+    from .data_utils.preprocess import generate_rgnn_adjacency_matrix
+    from .data_utils.constants.seed import SEED_CHANNEL_NAME, SEED_GLOBAL_CHANNEL_PAIRS
+    # from .data_utils.constants.channel_location import system_10_20_loc, system_10_05_loc
+    # a = generate_rgnn_adjacency_matrix(channel_names=SEED_CHANNEL_NAME,channel_loc=system_10_05_loc,global_channel_pair=SEED_GLOBAL_CHANNEL_PAIRS)
     # print(a)
     # if np.allclose(a, np.transpose(a)):
     #     print(a)
@@ -332,12 +332,12 @@ def test_m():
 #     #     print(new_sub_label.shape)
 
 def test_deap_original():
-    from ..data_utils.load_data import read_deap_raw
+    from .data_utils.load_data import read_deap_raw
     read_deap_raw("/date1/yss/data/DEAP数据集")
 
 def test_dreamer():
-    from ..data_utils.load_data import read_dreamer
-    from ..data_utils.preprocess import preprocess
+    from .data_utils.load_data import read_dreamer
+    from .data_utils.preprocess import preprocess
     import matplotlib.pyplot as plt
     data, base, label, sample_rate, channel = read_dreamer("/date1/yss/data/Dreamer数据集")
     data = [[[data[0][0][0]]]]
@@ -406,7 +406,7 @@ def testTSception():
         chan_no_duplicate = []
         [chan_no_duplicate.extend([f, chan_pair[i]]) for i, f in enumerate(chan_final) if f not in chan_no_duplicate]
         return chan_no_duplicate[0::2] + chan_no_duplicate[1::2]
-    from ..data_utils.constants.seed import SEED_CHANNEL_NAME
+    from .data_utils.constants.seed import SEED_CHANNEL_NAME
     # print(generate_TS_channel_order(SEED_CHANNEL_NAME))
     # print(len(generate_TS_channel_order(SEED_CHANNEL_NAME)))
 

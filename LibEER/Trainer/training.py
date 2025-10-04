@@ -5,7 +5,7 @@ from tqdm import tqdm
 from ..utils.metric import Metric
 from ..utils.store import save_state
 
-def train(model, dataset_train, dataset_val, dataset_test, device, output_dir="result/", metrics=None, metric_choose=None, optimizer=None, scheduler=None, batch_size=16, epochs=40, criterion=None, loss_func=None, loss_param=None):
+def train(model, dataset_train, dataset_val, dataset_test, device, output_dir="result/", metrics=None, metric_choose=None, optimizer=None, scheduler=None, warmup_scheduler=None, batch_size=16, epochs=40, criterion=None, loss_func=None, loss_param=None):
     if metrics is None:
         metrics = ['acc']
     if metric_choose is None:
@@ -14,9 +14,10 @@ def train(model, dataset_train, dataset_val, dataset_test, device, output_dir="r
     sampler_train = RandomSampler(dataset_train)
     sampler_val = SequentialSampler(dataset_val)
     sampler_test = SequentialSampler(dataset_test)
-    # load dataset
+    # load dataset (add shuffle=True and drop_last=True for training as per PGCN paper)
     data_loader_train = DataLoader(
-        dataset_train, sampler=sampler_train, batch_size=batch_size, num_workers=4
+        dataset_train, sampler=sampler_train, batch_size=batch_size, num_workers=4, 
+        shuffle=False, drop_last=True  # shuffle via sampler, drop_last=True to ensure batch size consistency
     )
     data_loader_val = DataLoader(
         dataset_val, sampler=sampler_val, batch_size=batch_size, num_workers=4
@@ -48,8 +49,18 @@ def train(model, dataset_train, dataset_val, dataset_test, device, output_dir="r
 
             loss.backward()
             optimizer.step()
+            
+            # Warmup scheduler dampening (PGCN paper style)
+            if warmup_scheduler is not None and idx < len(data_loader_train) - 1:
+                with warmup_scheduler.dampening():
+                    pass
 
-        if scheduler is not None:
+        # Step warmup scheduler after each epoch (except last batch which is handled above)
+        if warmup_scheduler is not None:
+            with warmup_scheduler.dampening():
+                if scheduler is not None:
+                    scheduler.step()
+        elif scheduler is not None:
             scheduler.step()
         print("\033[32m train state: " + metric.value())
         metric_value = evaluate(model, data_loader_val, device, metrics, criterion, loss_func, loss_param)

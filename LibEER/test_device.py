@@ -24,7 +24,7 @@ for key, value in HSLT_SEED_Regions.items():
 print(sum)
 
 
-from ..config.setting import Setting
+from .config.setting import Setting
 
 setting = Setting(dataset='deap',
                   dataset_path='DEAP/data_preprocessed_python',
@@ -41,4 +41,4 @@ setting = Setting(dataset='deap',
                   split_type='train-val-test',
                   test_size=0.2,
                   val_size=0.2)
-from ..config.setting import seed_sub_dependent_front_back_setting
+from .config.setting import seed_sub_dependent_front_back_setting
