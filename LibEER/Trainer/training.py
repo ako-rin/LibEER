@@ -12,7 +12,7 @@ def train(model, dataset_train, dataset_val, dataset_test, device, output_dir="r
         metric_choose = metrics[0]
     # data sampler for train and test data
     sampler_train = RandomSampler(dataset_train)
-    sampler_val = SequentialSampler(dataset_val)
+    sampler_val = RandomSampler(dataset_val)  # Use RandomSampler for val to match PGCN paper
     sampler_test = SequentialSampler(dataset_test)
     # load dataset (add shuffle=True and drop_last=True for training as per PGCN paper)
     data_loader_train = DataLoader(
@@ -20,10 +20,12 @@ def train(model, dataset_train, dataset_val, dataset_test, device, output_dir="r
         shuffle=False, drop_last=True  # shuffle via sampler, drop_last=True to ensure batch size consistency
     )
     data_loader_val = DataLoader(
-        dataset_val, sampler=sampler_val, batch_size=batch_size, num_workers=4
+        dataset_val, sampler=sampler_val, batch_size=batch_size, num_workers=4, 
+        shuffle=False, drop_last=False  # shuffle via sampler
     )
     data_loader_test = DataLoader(
-        dataset_test, sampler=sampler_test, batch_size=batch_size, num_workers=4
+        dataset_test, sampler=sampler_test, batch_size=batch_size, num_workers=4,
+        shuffle=False  # sequential order for test
     )
     model = model.to(device)
     best_metric = {s: 0. for s in metrics}
@@ -39,12 +41,27 @@ def train(model, dataset_train, dataset_val, dataset_test, device, output_dir="r
             # load the samples into the device
             samples = samples.to(device)
             targets = targets.to(device)
+            
+            # Handle targets: convert one-hot to class indices if needed
+            if targets.dim() > 1 and targets.size(-1) > 1:
+                # One-hot encoded: (batch_size, num_classes) -> (batch_size,)
+                targets = torch.argmax(targets, dim=-1)
+            elif targets.dim() > 1:
+                # (batch_size, 1) -> (batch_size,)
+                targets = targets.squeeze(-1)
+            
+            # Ensure targets are integer class indices
+            if targets.dtype != torch.long:
+                targets = targets.long()
+            
             optimizer.zero_grad()
             # perform emotion recognition
             outputs = model(samples)
+            # some models (e.g., PGCN) return (logits, laplacian, feature); extract logits
+            logits = outputs[0] if isinstance(outputs, (tuple, list)) else outputs
             # calculate the loss value
-            loss = criterion(outputs, targets) +  (0 if loss_func is None else loss_func(loss_param))
-            metric.update(torch.argmax(outputs, dim=1), targets, loss.item())
+            loss = criterion(logits, targets) +  (0 if loss_func is None else loss_func(loss_param))
+            metric.update(torch.argmax(logits, dim=1), targets, loss.item())
             train_bar.set_postfix_str(f"loss: {loss.item():.2f}")
 
             loss.backward()
@@ -86,15 +103,29 @@ def evaluate(model, data_loader, device, metrics, criterion, loss_func, loss_par
         # load the samples into the device
         samples = samples.to(device)
         targets = targets.to(device)
+        
+        # Handle targets: convert one-hot to class indices if needed
+        if targets.dim() > 1 and targets.size(-1) > 1:
+            # One-hot encoded: (batch_size, num_classes) -> (batch_size,)
+            targets = torch.argmax(targets, dim=-1)
+        elif targets.dim() > 1:
+            # (batch_size, 1) -> (batch_size,)
+            targets = targets.squeeze(-1)
+        
+        # Ensure targets are integer class indices
+        if targets.dtype != torch.long:
+            targets = targets.long()
 
         # perform emotion recognition
         outputs = model(samples)
+        # some models (e.g., PGCN) return (logits, laplacian, feature); extract logits
+        logits = outputs[0] if isinstance(outputs, (tuple, list)) else outputs
 
         # calculate the loss value
-        loss = criterion(outputs, targets) + (0 if loss_func is None else loss_func(loss_param))
+        loss = criterion(logits, targets) + (0 if loss_func is None else loss_func(loss_param))
         # one hot code
         # loss = criterion(outputs, targets)
-        metric.update(torch.argmax(outputs, dim=1), targets, loss.item())
+        metric.update(torch.argmax(logits, dim=1), targets, loss.item())
 
     print("\033[34m eval state: " + metric.value())
     return metric.values
