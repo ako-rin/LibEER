@@ -9,8 +9,9 @@ import multiprocessing as mp
 from functools import partial
 import mne
 import xmltodict
+import warnings
 
-from ..data_utils.preprocess import preprocess, label_process
+from ..data_utils.preprocess import preprocess, label_process, lds
 
 
 def get_data(setting=None):
@@ -24,10 +25,12 @@ def get_data(setting=None):
                                      pass_band=setting.pass_band, extract_bands=setting.extract_bands,
                                      sample_length=setting.sample_length, stride=setting.stride
                                      , time_window=setting.time_window, overlap=setting.overlap,
+                                     # 这里进行判断，若数据集是经过特征提取了的，就设定为 True
                                      only_seg=setting.only_seg if setting.dataset not in extract_dataset else True,
+                                     
                                      feature_type=setting.feature_type,
                                      eog_clean=setting.eog_clean)
-
+    # bounds： 阈值设置，当二分类（低/高）双标签（valence + arousal）：设为 [5,5]，分别作为两个维度的阈值。
     all_data, all_label, num_classes = label_process(data=all_data, label=label, bounds=setting.bounds, onehot=setting.onehot, label_used=setting.label_used)
     return all_data, all_label, channels, feature_dim, num_classes
 
@@ -35,13 +38,19 @@ def get_data(setting=None):
 available_dataset = [
     "seed_raw", "seediv_raw", "deap", "deap_raw", "hci", "dreamer", "seed_de", "seed_de_lds", "seed_psd", "seed_psd_lds", "seed_dasm", "seed_dasm_lds"
     , "seed_rasm", "seed_rasm_lds", "seed_asm", "seed_asm_lds", "seed_dcau", "seed_dcau_lds", "seediv_de_lds", "seediv_de_movingAve",
-    "seediv_psd_movingAve", "seediv_psd_lds"
+    "seediv_psd_movingAve", "seediv_psd_lds",
+    # SEED-V features (DE)
+    "seedv_de", "seedv_de_lds",
+    # SEED-V raw
+    "seedv_raw"
 ]
 
 extract_dataset = {
-    "seed_de", "seed_de_lds", "seed_psd", "seed_psd_lds", "seed_dasm", "seed_dasm_lds"
-    , "seed_rasm", "seed_rasm_lds", "seed_asm", "see_und_asm_lds", "seed_dcau", "seed_dcau_lds", "seediv_de_lds", "seediv_de_movingAve",
-    "seediv_psd_movingAve", "seediv_psd_lds"
+    "seed_de", "seed_de_lds", "seed_psd", "seed_psd_lds", "seed_dasm", "seed_dasm_lds",
+    "seed_rasm", "seed_rasm_lds", "seed_asm", "seed_asm_lds", "seed_dcau", "seed_dcau_lds",
+    "seediv_de_lds", "seediv_de_movingAve", "seediv_psd_movingAve", "seediv_psd_lds",
+    # SEED-V features treated as extracted features
+    "seedv_de", "seedv_de_lds"
 }
 
 def get_uniform_data(dataset, dataset_path):
@@ -60,9 +69,17 @@ def get_uniform_data(dataset, dataset_path):
         "seediv_raw": read_seedIV_raw,
         "hci": read_hci
     }
-    if dataset.startswith("seediv") and dataset != "seediv_raw":
+    # SEED-V first to avoid falling into generic 'seed' branch
+    if dataset.startswith("seedv"):
+        if dataset == "seedv_de" or dataset == "seedv_de_lds":
+            data, baseline, label, sample_rate, channels = read_seedV_feature(dataset_path, feature_type=dataset[6:])
+        elif dataset == "seedv_raw":
+            data, baseline, label, sample_rate, channels = read_seedV_raw(dataset_path)
+        else:
+            raise ValueError(f"Unknown SEED-V variant '{dataset}'. Supported: ['seedv_de', 'seedv_de_lds', 'seedv_raw']")
+    elif dataset.startswith("seediv") and dataset != "seediv_raw":
         data, baseline, label, sample_rate, channels = read_seedIV_feature(dataset_path, feature_type=dataset[7:])
-    elif dataset.startswith("seed") and not dataset.startswith("seediv") and dataset != "seed_raw":
+    elif dataset.startswith("seed") and not dataset.startswith(("seediv", "seedv")) and dataset != "seed_raw":
         # call the read_seed_feature function when using the feature provided by seed official
         data, baseline, label, sample_rate, channels = read_seed_feature(dataset_path, feature_type=dataset[5:])
     else:
@@ -485,3 +502,240 @@ def read_hci(dir_path):
     filter_d_l_b = [(d,l,b) for d,l,b in zip(data[0], labels[0], base[0]) if l != []]
     data[0], labels[0], base[0] = zip(*filter_d_l_b) if filter_d_l_b else ([],[],[])
     return data, base, labels, 128, 32
+
+
+# ===================== SEED-V =====================
+def read_seedV_feature(dir_path, feature_type="de"):
+    """
+    读取 SEED-V 官方特征（基于 datasets/SEED-V/EEG_DE_features/*.npz）。
+
+    目录示例:
+      - EEG_DE_features/
+          1_123.npz, 2_123.npz, ..., 16_123.npz
+
+    每个 npz 含有两个 0 维字节数组键: 'data', 'label'，它们是 pickled dict：
+      - data: {0..44: np.ndarray(num_segments, 310)}  310 = 62 channels × 5 bands
+      - label: {0..44: np.ndarray(num_segments,)}      每段的情感类别，取第一个值作为该 trial 的标签
+      num_segments 为每个 trial 有多少份数据，不同的 trail 的 num_segments 也不同
+
+    返回：
+      data:    (session=3, subject=16, trail=15, sample, channel=62, band=5)
+      baseline: None
+      label:   (session=3, subject=16, trail=15)  整数标签 0..4
+      sample_rate: None（不用于已提取特征的流程）
+      channels: 62
+
+    feature_type 支持: 'de' 与 'de_lds'（后者对每 trial 的 (sample,channel,band) 施加 LDS 平滑）
+    """
+    feat_dir = os.path.join(dir_path, "EEG_DE_features")
+    if not os.path.isdir(feat_dir):
+        raise FileNotFoundError(f"SEED-V features directory not found: {feat_dir}")
+
+    # 收集受试者 npz 文件（名称形如 '1_123.npz'）
+    npz_files = [f for f in os.listdir(feat_dir) if f.endswith('.npz')]
+    # 仅匹配以数字开头的 1..n 受试者
+    def subj_key(name: str):
+        try:
+            return int(name.split('_', 1)[0])
+        except Exception:
+            return 1 << 30
+    npz_files.sort(key=subj_key)
+    if not npz_files:
+        raise FileNotFoundError(f"No npz files found in {feat_dir}")
+
+    subjects = len(npz_files)
+    channels = 62
+    bands = 5
+
+    # 预分配容器: 3 session × subjects × 15 trials
+    data = [[[[] for _ in range(15)] for _ in range(subjects)] for _ in range(3)]
+    labels = [[[0 for _ in range(15)] for _ in range(subjects)] for _ in range(3)]
+
+    for s_idx, npz_name in enumerate(npz_files):
+        npz_path = os.path.join(feat_dir, npz_name)
+        with np.load(npz_path, allow_pickle=True) as f:
+            # 解包 pickled dict
+            data_obj = pickle.loads(f['data'].tobytes())
+            label_obj = pickle.loads(f['label'].tobytes())
+        # 按键排序并按 15 试次 × 3 会话切分
+        # data_obj.keys() 返回字典试图对象，还不是列表
+        keys = sorted(list(data_obj.keys()))
+        if len(keys) != 45:
+            # 冗余操作，防止trial数不足45个
+            # 兜底：尝试按 15 的倍数切分；否则所有 trial 放到第一 session
+            # 一个session 15 个trial，三个session放在同一个 .npz 中
+            total_trials = len(keys)
+            ses_counts = [min(15, total_trials), min(15, max(0, total_trials-15)), max(0, total_trials-30)]
+        else:
+            ses_counts = [15, 15, 15]
+
+        offset = 0
+        for ses_id in range(3): # 0 1 2
+            for t in range(ses_counts[ses_id]): # 正常来说循环15次
+                k = keys[offset + t]
+                trial_2d = np.asarray(data_obj[k])  # (num_segments, 310)
+                if trial_2d.ndim != 2 or trial_2d.shape[1] != channels * bands:
+                    raise ValueError(f"Unexpected feature shape in {npz_name}, key={k}: {trial_2d.shape}, expect (*, {channels*bands})")
+                num_segments = trial_2d.shape[0]
+                # 还原为 (sample, channel, band)
+                trial_feat = trial_2d.reshape(num_segments, channels, bands)
+
+                # 可选 LDS 平滑（以 sample 维为时间）
+                if feature_type.endswith('_lds'):
+                    trial_feat = lds(trial_feat)
+
+                # trial 标签：取该 trial 的第一个段标签
+                trial_label_arr = np.asarray(label_obj[k])
+                if trial_label_arr.size == 0:
+                    trial_label = 0
+                else:
+                    trial_label = int(trial_label_arr.flat[0])
+
+                data[ses_id][s_idx][t] = trial_feat.tolist() # reshape后的数据转换成列表存储
+                labels[ses_id][s_idx][t] = trial_label
+            # 更新 offset
+            offset += ses_counts[ses_id]
+
+    return data, None, labels, None, channels
+
+
+def _parse_seedv_timestamps(ts_file: str):
+    """Parse trial_start_end_timestamp.txt into a dict: {1: [(s,e),...15], 2: [...], 3: [...]} in seconds."""
+    if not os.path.isfile(ts_file):
+        raise FileNotFoundError(f"SEED-V timestamps file not found: {ts_file}")
+    with open(ts_file, 'r', encoding='utf-8') as f:
+        text = f.read()
+    sessions = {}
+    for ses in (1, 2, 3):
+        # crude parse for lines after 'Session X:'
+        marker = f"Session {ses}:"
+        idx = text.find(marker)
+        if idx == -1:
+            raise ValueError(f"Timestamps missing block for Session {ses}")
+        sub = text[idx:]
+        # find start and end arrays in brackets
+        def extract_array(name):
+            midx = sub.find(name)
+            if midx == -1:
+                raise ValueError(f"Timestamps missing '{name}' for Session {ses}")
+            sidx = sub.find('[', midx)
+            eidx = sub.find(']', sidx)
+            arr = sub[sidx+1:eidx]
+            nums = [int(x.strip()) for x in arr.split(',') if x.strip()]
+            return nums
+        starts = extract_array('start_second')
+        ends = extract_array('end_second')
+        if len(starts) != 15 or len(ends) != 15:
+            raise ValueError(f"Session {ses} expected 15 trials, got {len(starts)} starts and {len(ends)} ends")
+        sessions[ses] = list(zip(starts, ends))
+    return sessions
+
+
+def read_seedV_raw(dir_path, target_sfreq: int = 200):
+    """
+    读取 SEED-V 原始 EEG（EEG_raw/*.cnt），按 trial_start_end_timestamp.txt 切分 trial。
+
+    返回：
+      - data: (session=3, subject, trail=15, channel=62, time_points)
+      - baseline: None
+      - label: (session=3, subject, trail) 使用对应 subject 的 DE 特征 npz 的标签
+      - sample_rate: target_sfreq (默认重采样为 200Hz)
+      - channels: 62
+    """
+    raw_dir = os.path.join(dir_path, 'EEG_raw')
+    if not os.path.isdir(raw_dir):
+        raise FileNotFoundError(f"SEED-V raw directory not found: {raw_dir}")
+    ts_path = os.path.join(dir_path, 'trial_start_end_timestamp.txt')
+    ses_ts = _parse_seedv_timestamps(ts_path)
+
+    # group files by subject and session from pattern like '1_1_20180804.cnt'
+    all_cnt = [f for f in os.listdir(raw_dir) if f.lower().endswith('.cnt')]
+    def parse_info(name: str):
+        # returns (subject_id:int, session_id:int)
+        stem = os.path.splitext(name)[0]
+        parts = stem.split('_')
+        if len(parts) < 2:
+            return None
+        try:
+            sid = int(parts[0])
+            ses = int(parts[1])
+            return sid, ses
+        except Exception:
+            return None
+    file_map = {}
+    for fname in all_cnt:
+        info = parse_info(fname)
+        if info is None:
+            continue
+        subj, ses = info
+        file_map.setdefault(subj, {})[ses] = fname
+
+    subj_ids = sorted(file_map.keys())
+    if not subj_ids:
+        raise FileNotFoundError(f"No CNT files found in {raw_dir}")
+
+    subjects = len(subj_ids)
+    channels = 62
+    sample_rate = target_sfreq
+
+    data = [[[[] for _ in range(15)] for _ in range(subjects)] for _ in range(3)]
+    labels = [[[0 for _ in range(15)] for _ in range(subjects)] for _ in range(3)]
+
+    # Prepare labels from DE feature npz per subject for consistency
+    feat_dir = os.path.join(dir_path, 'EEG_DE_features')
+    use_npz_labels = os.path.isdir(feat_dir)
+
+    for s_idx, subj in enumerate(subj_ids):
+        # optional: load npz labels for this subject
+        npz_labels = None
+        if use_npz_labels:
+            npz_name = None
+            # find file like '{subj}_*.npz'
+            for f in os.listdir(feat_dir):
+                if f.startswith(f"{subj}_") and f.endswith('.npz'):
+                    npz_name = os.path.join(feat_dir, f)
+                    break
+            if npz_name is not None:
+                with np.load(npz_name, allow_pickle=True) as ff:
+                    try:
+                        lab_obj = pickle.loads(ff['label'].tobytes())
+                        # build ordered labels by keys 0..44
+                        keys = sorted(list(lab_obj.keys()))
+                        npz_labels = [int(np.asarray(lab_obj[k]).flat[0]) if np.asarray(lab_obj[k]).size>0 else 0 for k in keys]
+                    except Exception:
+                        npz_labels = None
+
+        for ses_id in (1, 2, 3):
+            if ses_id not in file_map[subj]:
+                continue
+            cnt_path = os.path.join(raw_dir, file_map[subj][ses_id])
+            # Suppress benign meas date warning from CNT headers
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message=r".*Could not parse meas date from the header.*",
+                    category=RuntimeWarning,
+                )
+                raw = mne.io.read_raw_cnt(cnt_path, preload=True, verbose=False)
+            # pick first 62 EEG channels (assumption: EEG at the top)
+            raw.pick(raw.ch_names[:channels])
+            if target_sfreq is not None and abs(raw.info['sfreq'] - target_sfreq) > 1e-6:
+                raw.resample(target_sfreq)
+            # slice trials per timestamps
+            for t_idx, (start_s, end_s) in enumerate(ses_ts[ses_id]):
+                # safety guards
+                start_samp = max(0, int(start_s * target_sfreq))
+                end_samp = min(int(end_s * target_sfreq), raw.n_times)
+                seg = raw.get_data(start=start_samp, stop=end_samp)  # (channels, time)
+                data[ses_id-1][s_idx][t_idx] = seg.tolist()
+                # label from npz if available
+                if npz_labels is not None:
+                    k = (ses_id-1)*15 + t_idx
+                    if 0 <= k < len(npz_labels):
+                        labels[ses_id-1][s_idx][t_idx] = int(npz_labels[k])
+                    else:
+                        labels[ses_id-1][s_idx][t_idx] = 0
+                else:
+                    labels[ses_id-1][s_idx][t_idx] = 0
+
+    return data, None, labels, sample_rate, channels

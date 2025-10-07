@@ -6,6 +6,36 @@ from ..utils.metric import Metric
 from ..utils.store import save_state
 
 def train(model, dataset_train, dataset_val, dataset_test, device, output_dir="result/", metrics=None, metric_choose=None, optimizer=None, scheduler=None, warmup_scheduler=None, batch_size=16, epochs=40, criterion=None, loss_func=None, loss_param=None):
+    """
+    训练+验证+测试统一入口。
+
+    Args:
+        model: 已构建好的 PyTorch 模型。
+        dataset_train, dataset_val, dataset_test: PyTorch Dataset 对象。
+        device: 训练设备（如 'cuda' 或 torch.device）。
+        output_dir (str): 最优模型的保存目录。
+        metrics (list[str] | str | None): 评估指标列表或逗号分隔字符串；支持：
+            - 'acc'（准确率）
+            - 'macro-f1'
+            - 'micro-f1'
+            - 'weighted-f1'
+            - 'ck'（Cohen's kappa）
+            为空则默认 ['acc']。
+        metric_choose (str | None): 作为“最佳模型”判定的指标名；默认取 metrics[0]。
+        optimizer, scheduler, warmup_scheduler: 优化器、学习率调度器与 warmup 调度器。
+        batch_size (int): 训练/验证/测试的 batch 大小。
+        epochs (int): 训练轮数。
+        criterion: 监督损失（如交叉熵/标签平滑 CE 等）。签名应为 criterion(logits, targets)。
+        loss_func (callable | None): 可选的辅助损失函数；签名为 loss_func(loss_param)->scalar。
+        loss_param (Any): 传给 loss_func 的参数（如权重与参数组等）。
+
+    Returns:
+        dict: 在测试集上的各指标分数，如 {'acc': 0.93, 'macro-f1': 0.91, ...}
+
+    Notes:
+        - 训练与验证阶段的 loss 都会加上辅助损失：loss = criterion(...) + (loss_func(loss_param) if loss_func else 0)。
+        - 最佳模型根据 metric_choose 在验证集上选择，并保存到 output_dir。
+    """
     if metrics is None:
         metrics = ['acc']
     if metric_choose is None:
@@ -95,6 +125,21 @@ def train(model, dataset_train, dataset_val, dataset_test, device, output_dir="r
 
 @torch.no_grad()
 def evaluate(model, data_loader, device, metrics, criterion, loss_func, loss_param):
+    """
+    在给定 DataLoader 上评估模型，返回指标字典。
+
+    Args:
+        model: 已在正确设备上的模型。
+        data_loader: PyTorch DataLoader。
+        device: 设备。
+        metrics (list[str]): 评估指标，同 train 中说明。
+        criterion: 监督损失函数（criterion(logits, targets)）。
+        loss_func (callable | None): 辅助损失函数（loss_func(loss_param)）。
+        loss_param: 传入辅助损失的参数。
+
+    Returns:
+        dict: 评估得到的指标分数字典。
+    """
     model.eval()
     # create Metric object
     metric = Metric(metrics)

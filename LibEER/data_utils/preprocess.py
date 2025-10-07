@@ -400,9 +400,10 @@ def segment_data(data, sample_length, stride):
                     label: (session, subject, trail)
     """
     if sample_length == 1:
-        print(len(data[0][0]))
-        print(len(data[0][0][0]))
-        print(len(data[0][0][0][0]))
+        print("[segment_data] Each subject's trial =", len(data[0][0]))
+        print("[segment_data] The first trial's sample =", len(data[0][0][0]))
+        print("[segment_data] Each sample's channel =", len(data[0][0][0][0]))
+        print("[segment_data] Each channel's band =", len(data[0][0][0][0][0]))
         return data, len(data[0][0][0][0][0])
     else:
         seg_data = []
